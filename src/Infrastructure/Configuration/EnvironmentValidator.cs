@@ -5,17 +5,27 @@ public static class EnvironmentValidator
     private static readonly string[] RequiredKeys =
     {
         "SUPABASE_URL",
-        "SUPABASE_ANON_KEY",
-        "SUPABASE_SERVICE_ROLE_KEY"
+        "SUPABASE_ANON_KEY"
     };
 
     public static void ValidateOrThrow()
     {
         var missingKeys = RequiredKeys
             .Where(IsMissing)
-            .ToArray();
+            .ToList();
 
-        if (missingKeys.Length == 0)
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        var isProduction = string.Equals(
+            environment,
+            "Production",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (isProduction && IsMissing("SUPABASE_SERVICE_ROLE_KEY"))
+        {
+            missingKeys.Add("SUPABASE_SERVICE_ROLE_KEY");
+        }
+
+        if (missingKeys.Count == 0)
         {
             return;
         }
