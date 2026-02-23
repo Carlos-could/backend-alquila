@@ -1,12 +1,21 @@
 using System.Security.Claims;
 using Backend.Alquila.Features.Auth;
 using Backend.Alquila.Infrastructure.Configuration;
+using Backend.Alquila.Infrastructure.Persistence.Migrations;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
 DotEnvLoader.LoadIfExists(Path.Combine(builder.Environment.ContentRootPath, ".env"));
+
+if (MigrationRunner.IsMigrationCommand(args))
+{
+    var result = await MigrationRunner.RunAsync(args, builder.Environment.ContentRootPath);
+    Environment.ExitCode = result;
+    return;
+}
+
 EnvironmentValidator.ValidateOrThrow();
 
 var supabaseUrl = Environment.GetEnvironmentVariable("SUPABASE_URL")!.TrimEnd('/');

@@ -24,6 +24,24 @@ Copiar `.env.example` a `.env` y completar:
 
 Si falta una variable critica, el backend falla al iniciar con mensaje claro.
 
+## Migraciones de base de datos (F1-T05)
+
+Scripts versionados:
+- `database/migrations/0001_initial_schema.up.sql`
+- `database/migrations/0001_initial_schema.down.sql`
+
+Comandos:
+
+```bash
+dotnet run -- migrate up
+dotnet run -- migrate down
+```
+
+Requiere `DATABASE_URL` valido (PostgreSQL).
+
+Diagrama y descripcion de entidades:
+- `docs/data-model.md`
+
 ## Autorizacion por roles (F1-T04)
 
 Roles soportados:
