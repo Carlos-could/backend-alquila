@@ -42,6 +42,15 @@ Requiere `DATABASE_URL` valido (PostgreSQL).
 Diagrama y descripcion de entidades:
 - `docs/data-model.md`
 
+## CI basico (F1-T06)
+
+Workflow: `.github/workflows/ci.yml`
+
+Se ejecuta en `pull_request` y `push` a `main` con:
+- `dotnet format analyzers --verify-no-changes` (lint)
+- `dotnet build --configuration Release`
+- `dotnet test tests/Backend.Alquila.Tests/Backend.Alquila.Tests.csproj --configuration Release`
+
 ## Autorizacion por roles (F1-T04)
 
 Roles soportados:

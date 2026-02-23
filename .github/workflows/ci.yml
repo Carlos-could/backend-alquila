@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Lint
+        run: dotnet format analyzers --verify-no-changes --verbosity minimal
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore --verbosity minimal
+
+      - name: Test
+        run: dotnet test tests/Backend.Alquila.Tests/Backend.Alquila.Tests.csproj --configuration Release --no-build --no-restore --verbosity minimal
