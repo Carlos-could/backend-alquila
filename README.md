@@ -1,4 +1,4 @@
-# Backend Alquila
+ï»¿# Backend Alquila
 
 Base API para el MVP de Alquila.
 
@@ -22,7 +22,29 @@ Copiar `.env.example` a `.env` y completar:
 - `DATABASE_URL` (opcional en F1)
 - `SENTRY_DSN` (opcional)
 
-Si falta una variable crítica, el backend falla al iniciar con mensaje claro.
+Si falta una variable critica, el backend falla al iniciar con mensaje claro.
+
+## Autorizacion por roles (F1-T04)
+
+Roles soportados:
+- `inquilino`
+- `propietario`
+- `admin`
+
+Rutas protegidas:
+- `GET /auth/me` (requiere usuario autenticado)
+- `GET /inquilino` (solo `inquilino`)
+- `GET /propietario` (solo `propietario`)
+- `GET /admin` (solo `admin`)
+
+Matriz de permisos:
+- `docs/security/permissions-matrix.md`
+
+Para probar rutas protegidas, enviar JWT en header:
+
+```bash
+Authorization: Bearer <access_token>
+```
 
 ## Estructura inicial (F1-T01)
 
