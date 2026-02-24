@@ -86,3 +86,16 @@ Evidencia:
 - Variable `SENTRY_DSN` declarada como opcion de observabilidad en `.env.example` y `README.md`.
 - Guia breve de troubleshooting agregada en `docs/troubleshooting-observability.md`.
 
+## Epica F2: Publicacion y busqueda de inmuebles
+
+### F2-T01 - Entidad `properties` completa
+Prioridad: P0
+Objetivo: almacenar datos de inmueble de forma consistente.
+Estado: En progreso
+Evidencia:
+- Migracion incremental creada: `database/migrations/0002_properties_full_entity.up.sql` y rollback `database/migrations/0002_properties_full_entity.down.sql`.
+- Tabla `properties` extendida con campos de negocio: deposito, habitaciones, banos, m2, amueblado, disponibilidad, tipo de contrato y estado.
+- Reglas de integridad agregadas en base de datos con checks (`monthly_price > 0`, `area_m2 > 0`, etc.).
+- Indices de busqueda de propiedades por precio y por ciudad+precio: `idx_properties_monthly_price`, `idx_properties_city_monthly_price`.
+- Contratos y validacion base de la entidad agregados en `src/Features/Properties/PropertyContracts.cs` y `src/Features/Properties/PropertyValidator.cs`.
+- Pruebas de validacion agregadas en `tests/Backend.Alquila.Tests/PropertyValidatorTests.cs`.

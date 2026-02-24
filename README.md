@@ -29,6 +29,8 @@ Si falta una variable critica, el backend falla al iniciar con mensaje claro.
 Scripts versionados:
 - `database/migrations/0001_initial_schema.up.sql`
 - `database/migrations/0001_initial_schema.down.sql`
+- `database/migrations/0002_properties_full_entity.up.sql`
+- `database/migrations/0002_properties_full_entity.down.sql`
 
 Comandos:
 
