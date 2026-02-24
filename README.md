@@ -61,6 +61,12 @@ Archivos de despliegue:
 Runbook:
 - `docs/staging-deploy-runbook.md`
 
+## Observabilidad (F1-T08)
+
+- Manejo central de errores habilitado con `ProblemDetails` + `UseExceptionHandler`.
+- Guia breve de troubleshooting: `docs/troubleshooting-observability.md`.
+- Registro de estado por ticket: `docs/tickets.md`.
+
 ## Autorizacion por roles (F1-T04)
 
 Roles soportados:
