@@ -91,6 +91,16 @@ Para probar rutas protegidas, enviar JWT en header:
 Authorization: Bearer <access_token>
 ```
 
+## Properties (F2-T01 / F2-T02)
+
+Endpoints protegidos:
+- `POST /properties`
+- `PATCH /properties/{id}`
+
+Reglas de acceso:
+- Crear: `propietario` o `admin`.
+- Editar: `admin` o propietario dueno del inmueble.
+
 ## Estructura inicial (F1-T01)
 
 ```text

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Backend.Alquila.Features.Auth;
+using Backend.Alquila.Features.Properties;
 using Backend.Alquila.Infrastructure.Configuration;
 using Backend.Alquila.Infrastructure.Persistence.Migrations;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -57,6 +58,7 @@ builder.Services.AddAuthorization(options =>
 });
 
 builder.Services.AddProblemDetails();
+builder.Services.AddScoped<IPropertiesRepository, NpgsqlPropertiesRepository>();
 
 var app = builder.Build();
 
@@ -84,6 +86,8 @@ app.MapGet("/propietario", () => Results.Ok(new { area = "propietario", access =
 
 app.MapGet("/inquilino", () => Results.Ok(new { area = "inquilino", access = "granted" }))
     .RequireAuthorization(AuthorizationPolicies.InquilinoOnly);
+
+app.MapPropertyEndpoints();
 
 app.Run();
 

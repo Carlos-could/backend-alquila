@@ -91,7 +91,7 @@ Evidencia:
 ### F2-T01 - Entidad `properties` completa
 Prioridad: P0
 Objetivo: almacenar datos de inmueble de forma consistente.
-Estado: En progreso
+Estado: Done
 Evidencia:
 - Migracion incremental creada: `database/migrations/0002_properties_full_entity.up.sql` y rollback `database/migrations/0002_properties_full_entity.down.sql`.
 - Tabla `properties` extendida con campos de negocio: deposito, habitaciones, banos, m2, amueblado, disponibilidad, tipo de contrato y estado.
@@ -99,3 +99,18 @@ Evidencia:
 - Indices de busqueda de propiedades por precio y por ciudad+precio: `idx_properties_monthly_price`, `idx_properties_city_monthly_price`.
 - Contratos y validacion base de la entidad agregados en `src/Features/Properties/PropertyContracts.cs` y `src/Features/Properties/PropertyValidator.cs`.
 - Pruebas de validacion agregadas en `tests/Backend.Alquila.Tests/PropertyValidatorTests.cs`.
+
+### F2-T02 - API crear/editar inmueble (propietario)
+Prioridad: P0
+Objetivo: que propietarios gestionen sus anuncios.
+Estado: Done
+Evidencia:
+- Endpoint `POST /properties` implementado en `src/Features/Properties/PropertyEndpoints.cs`.
+- Endpoint `PATCH /properties/{id}` implementado en `src/Features/Properties/PropertyEndpoints.cs`.
+- Repositorio de persistencia PostgreSQL implementado en `src/Features/Properties/NpgsqlPropertiesRepository.cs`.
+- Repositorio registrado en DI en `Program.cs` (`IPropertiesRepository`).
+- Autorizacion aplicada:
+  - Creacion solo para `propietario` y `admin`.
+  - Edicion permitida a `admin` o al propietario dueno del inmueble.
+- Validaciones de payload aplicadas para create/patch con `PropertyValidator`.
+- Pruebas de autorizacion agregadas en `tests/Backend.Alquila.Tests/PropertiesAuthorizationIntegrationTests.cs`.

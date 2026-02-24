@@ -10,6 +10,8 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
 {
     public const string SchemeName = "TestAuth";
     public const string RoleHeader = "X-Test-Role";
+    public const string UserIdHeader = "X-Test-UserId";
+    public const string DefaultUserId = "11111111-1111-1111-1111-111111111111";
 
     public TestAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -27,11 +29,14 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
         }
 
         var role = roleValues.ToString().Trim().ToLowerInvariant();
+        var userId = Request.Headers.TryGetValue(UserIdHeader, out var userIdValues)
+            ? userIdValues.ToString().Trim()
+            : DefaultUserId;
 
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, "test-user-id"),
-            new("sub", "test-user-id"),
+            new(ClaimTypes.NameIdentifier, userId),
+            new("sub", userId),
             new("role", role)
         };
 
