@@ -1,0 +1,45 @@
+name: deploy-staging
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render deploy hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
+
+      - name: Wait for staging healthcheck
+        env:
+          STAGING_HEALTHCHECK_URL: ${{ secrets.STAGING_HEALTHCHECK_URL }}
+        run: |
+          if [ -z "$STAGING_HEALTHCHECK_URL" ]; then
+            echo "Missing secret: STAGING_HEALTHCHECK_URL"
+            exit 1
+          fi
+
+          for i in $(seq 1 30); do
+            if curl -fsS "$STAGING_HEALTHCHECK_URL" > /dev/null; then
+              echo "Healthcheck OK: $STAGING_HEALTHCHECK_URL"
+              exit 0
+            fi
+
+            echo "Waiting for staging... attempt $i/30"
+            sleep 10
+          done
+
+          echo "Healthcheck failed after waiting period."
+          exit 1

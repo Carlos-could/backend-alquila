@@ -51,6 +51,16 @@ Se ejecuta en `pull_request` y `push` a `main` con:
 - `dotnet build --configuration Release`
 - `dotnet test tests/Backend.Alquila.Tests/Backend.Alquila.Tests.csproj --configuration Release`
 
+## Staging minimo (F1-T07)
+
+Archivos de despliegue:
+- `Dockerfile`
+- `render.yaml`
+- `.github/workflows/deploy-staging.yml`
+
+Runbook:
+- `docs/staging-deploy-runbook.md`
+
 ## Autorizacion por roles (F1-T04)
 
 Roles soportados:

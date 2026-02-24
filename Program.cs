@@ -9,6 +9,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 DotEnvLoader.LoadIfExists(Path.Combine(builder.Environment.ContentRootPath, ".env"));
 
+var assignedPort = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrWhiteSpace(assignedPort))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{assignedPort}");
+}
+
 if (MigrationRunner.IsMigrationCommand(args))
 {
     var result = await MigrationRunner.RunAsync(args, builder.Environment.ContentRootPath);
