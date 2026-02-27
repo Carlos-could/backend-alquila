@@ -5,6 +5,12 @@ namespace Backend.Alquila.Features.Auth;
 
 public static class RoleClaimResolver
 {
+    private static readonly HashSet<string> GenericSupabaseRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "authenticated",
+        "anon"
+    };
+
     private static readonly string[] DirectRoleClaimTypes =
     {
         ClaimTypes.Role,
@@ -21,12 +27,20 @@ public static class RoleClaimResolver
 
     public static string? Resolve(ClaimsPrincipal user)
     {
+        string? fallbackDirectRole = null;
+
         foreach (var claimType in DirectRoleClaimTypes)
         {
             var claimValue = user.FindFirstValue(claimType);
             if (!string.IsNullOrWhiteSpace(claimValue))
             {
-                return claimValue.Trim().ToLowerInvariant();
+                var normalized = claimValue.Trim().ToLowerInvariant();
+                if (!GenericSupabaseRoles.Contains(normalized))
+                {
+                    return normalized;
+                }
+
+                fallbackDirectRole ??= normalized;
             }
         }
 
@@ -40,7 +54,7 @@ public static class RoleClaimResolver
             }
         }
 
-        return null;
+        return fallbackDirectRole;
     }
 
     public static bool IsInAnyRole(ClaimsPrincipal user, params string[] allowedRoles)
