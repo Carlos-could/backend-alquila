@@ -159,9 +159,39 @@ public sealed class PropertiesAuthorizationIntegrationTests : IClassFixture<Prop
         var response = await client.GetAsync("/properties/public");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var items = await response.Content.ReadFromJsonAsync<List<PublicPropertyListItemResponse>>();
-        Assert.NotNull(items);
-        Assert.All(items!, item => Assert.Equal("Publicado por admin", item.Title));
+        var payload = await response.Content.ReadFromJsonAsync<PublicPropertySearchResponse>();
+        Assert.NotNull(payload);
+        Assert.NotEmpty(payload!.Items);
+        Assert.All(payload.Items, item => Assert.NotEqual("Inicial", item.Title));
+    }
+
+    [Fact]
+    public async Task PublicListing_WithCombinedFiltersAndSortAndPagination_ReturnsExpectedSubset()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync(
+            "/properties/public?city=Madrid&minPrice=900&maxPrice=1600&bedrooms=2&isFurnished=true&sort=price_asc&page=1&pageSize=1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<PublicPropertySearchResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(1, payload!.Page);
+        Assert.Equal(1, payload.PageSize);
+        Assert.Equal(2, payload.TotalItems);
+        Assert.Equal(2, payload.TotalPages);
+        Assert.Single(payload.Items);
+        Assert.Equal("Publicado precio 1000", payload.Items[0].Title);
+    }
+
+    [Fact]
+    public async Task PublicListing_WithInvalidPriceRange_ReturnsBadRequest()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/properties/public?minPrice=2000&maxPrice=1000");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -287,7 +317,7 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
         _propertiesById[Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd")] = new PropertyRecord(
             Id: Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
             OwnerUserId: OwnerUserId,
-            Title: "Publicado por admin",
+            Title: "Publicado precio 1500",
             Description: "Desc",
             City: "Madrid",
             Neighborhood: "Centro",
@@ -298,6 +328,46 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
             Bathrooms: 1,
             AreaM2: 80,
             IsFurnished: true,
+            AvailableFrom: DateOnly.FromDateTime(DateTime.UtcNow.Date),
+            ContractType: "long_term",
+            Status: "publicado",
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow);
+
+        _propertiesById[Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")] = new PropertyRecord(
+            Id: Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+            OwnerUserId: OwnerUserId,
+            Title: "Publicado precio 1000",
+            Description: "Desc",
+            City: "Madrid",
+            Neighborhood: "Chamberi",
+            Address: "Calle 3",
+            MonthlyPrice: 1000,
+            DepositAmount: 900,
+            Bedrooms: 2,
+            Bathrooms: 1,
+            AreaM2: 62,
+            IsFurnished: true,
+            AvailableFrom: DateOnly.FromDateTime(DateTime.UtcNow.Date),
+            ContractType: "long_term",
+            Status: "publicado",
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow);
+
+        _propertiesById[Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff")] = new PropertyRecord(
+            Id: Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            OwnerUserId: OwnerUserId,
+            Title: "Publicado no amueblado",
+            Description: "Desc",
+            City: "Madrid",
+            Neighborhood: "Retiro",
+            Address: "Calle 4",
+            MonthlyPrice: 1100,
+            DepositAmount: 900,
+            Bedrooms: 2,
+            Bathrooms: 1,
+            AreaM2: 65,
+            IsFurnished: false,
             AvailableFrom: DateOnly.FromDateTime(DateTime.UtcNow.Date),
             ContractType: "long_term",
             Status: "publicado",
@@ -484,12 +554,50 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
         }
     }
 
-    public Task<IReadOnlyList<PublicPropertyListItemResponse>> ListPublishedForPublicAsync(CancellationToken cancellationToken)
+    public Task<PublicPropertySearchResponse> SearchPublishedForPublicAsync(
+        PublicPropertySearchParams searchParams,
+        CancellationToken cancellationToken)
     {
         lock (_gate)
         {
-            var published = _propertiesById.Values
+            var filtered = _propertiesById.Values
                 .Where(property => property.Status == "publicado")
+                .AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(searchParams.City))
+            {
+                filtered = filtered.Where(property =>
+                    string.Equals(property.City, searchParams.City, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (searchParams.MinPrice.HasValue)
+            {
+                filtered = filtered.Where(property => property.MonthlyPrice >= searchParams.MinPrice.Value);
+            }
+
+            if (searchParams.MaxPrice.HasValue)
+            {
+                filtered = filtered.Where(property => property.MonthlyPrice <= searchParams.MaxPrice.Value);
+            }
+
+            if (searchParams.Bedrooms.HasValue)
+            {
+                filtered = filtered.Where(property => property.Bedrooms == searchParams.Bedrooms.Value);
+            }
+
+            if (searchParams.IsFurnished.HasValue)
+            {
+                filtered = filtered.Where(property => property.IsFurnished == searchParams.IsFurnished.Value);
+            }
+
+            filtered = searchParams.Sort switch
+            {
+                PublicPropertySortOptions.PriceAsc => filtered.OrderBy(property => property.MonthlyPrice).ThenByDescending(property => property.UpdatedAt),
+                PublicPropertySortOptions.PriceDesc => filtered.OrderByDescending(property => property.MonthlyPrice).ThenByDescending(property => property.UpdatedAt),
+                _ => filtered.OrderByDescending(property => property.UpdatedAt)
+            };
+
+            var mapped = filtered
                 .Select(property => new PublicPropertyListItemResponse(
                     Id: property.Id,
                     Title: property.Title,
@@ -502,7 +610,18 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
                     Bathrooms: property.Bathrooms,
                     CoverImageUrl: null))
                 .ToList();
-            return Task.FromResult<IReadOnlyList<PublicPropertyListItemResponse>>(published);
+
+            var totalItems = mapped.Count;
+            var offset = (searchParams.Page - 1) * searchParams.PageSize;
+            var items = mapped.Skip(offset).Take(searchParams.PageSize).ToList();
+            var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)searchParams.PageSize);
+
+            return Task.FromResult(new PublicPropertySearchResponse(
+                Items: items,
+                Page: searchParams.Page,
+                PageSize: searchParams.PageSize,
+                TotalItems: totalItems,
+                TotalPages: totalPages));
         }
     }
 

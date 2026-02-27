@@ -394,9 +394,54 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
         return items;
     }
 
-    public async Task<IReadOnlyList<PublicPropertyListItemResponse>> ListPublishedForPublicAsync(CancellationToken cancellationToken)
+    public async Task<PublicPropertySearchResponse> SearchPublishedForPublicAsync(
+        PublicPropertySearchParams searchParams,
+        CancellationToken cancellationToken)
     {
-        const string sql = """
+        var whereClauses = new List<string> { "p.status = 'publicado'" };
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(searchParams.City))
+        {
+            whereClauses.Add("lower(p.city) = lower(@city)");
+        }
+
+        if (searchParams.MinPrice.HasValue)
+        {
+            whereClauses.Add("p.monthly_price >= @minPrice");
+        }
+
+        if (searchParams.MaxPrice.HasValue)
+        {
+            whereClauses.Add("p.monthly_price <= @maxPrice");
+        }
+
+        if (searchParams.Bedrooms.HasValue)
+        {
+            whereClauses.Add("p.bedrooms = @bedrooms");
+        }
+
+        if (searchParams.IsFurnished.HasValue)
+        {
+            whereClauses.Add("p.is_furnished = @isFurnished");
+        }
+
+        var whereSql = string.Join(" and ", whereClauses);
+        var orderSql = searchParams.Sort switch
+        {
+            PublicPropertySortOptions.PriceAsc => "p.monthly_price asc, p.updated_at desc",
+            PublicPropertySortOptions.PriceDesc => "p.monthly_price desc, p.updated_at desc",
+            _ => "p.updated_at desc"
+        };
+
+        const string countSqlTemplate = """
+            select count(*)
+            from public.properties p
+            where __WHERE__;
+            """;
+
+        const string dataSqlTemplate = """
             select p.id, p.title, p.description, p.city, p.neighborhood, p.address,
                    p.monthly_price, p.bedrooms, p.bathrooms,
                    (
@@ -407,31 +452,51 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
                      limit 1
                    ) as cover_image_url
             from public.properties p
-            where p.status = 'publicado'
-            order by p.updated_at desc;
+            where __WHERE__
+            order by __ORDER__
+            limit @limit
+            offset @offset;
             """;
 
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var countCommand = new NpgsqlCommand(countSqlTemplate.Replace("__WHERE__", whereSql), connection);
+        await using var dataCommand = new NpgsqlCommand(
+            dataSqlTemplate.Replace("__WHERE__", whereSql).Replace("__ORDER__", orderSql),
+            connection);
+
+        AddPublicSearchParameters(countCommand, searchParams);
+        AddPublicSearchParameters(dataCommand, searchParams);
+        dataCommand.Parameters.AddWithValue("limit", searchParams.PageSize);
+        dataCommand.Parameters.AddWithValue("offset", (searchParams.Page - 1) * searchParams.PageSize);
+
+        var countScalar = await countCommand.ExecuteScalarAsync(cancellationToken);
+        var totalItems = countScalar is long count ? checked((int)count) : 0;
 
         var items = new List<PublicPropertyListItemResponse>();
-        while (await reader.ReadAsync(cancellationToken))
+        await using (var reader = await dataCommand.ExecuteReaderAsync(cancellationToken))
         {
-            items.Add(new PublicPropertyListItemResponse(
-                Id: reader.GetGuid(0),
-                Title: reader.GetString(1),
-                Description: reader.IsDBNull(2) ? null : reader.GetString(2),
-                City: reader.GetString(3),
-                Neighborhood: reader.IsDBNull(4) ? null : reader.GetString(4),
-                Address: reader.IsDBNull(5) ? null : reader.GetString(5),
-                MonthlyPrice: reader.GetDecimal(6),
-                Bedrooms: reader.GetInt32(7),
-                Bathrooms: reader.GetInt32(8),
-                CoverImageUrl: reader.IsDBNull(9) ? null : reader.GetString(9)));
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new PublicPropertyListItemResponse(
+                    Id: reader.GetGuid(0),
+                    Title: reader.GetString(1),
+                    Description: reader.IsDBNull(2) ? null : reader.GetString(2),
+                    City: reader.GetString(3),
+                    Neighborhood: reader.IsDBNull(4) ? null : reader.GetString(4),
+                    Address: reader.IsDBNull(5) ? null : reader.GetString(5),
+                    MonthlyPrice: reader.GetDecimal(6),
+                    Bedrooms: reader.GetInt32(7),
+                    Bathrooms: reader.GetInt32(8),
+                    CoverImageUrl: reader.IsDBNull(9) ? null : reader.GetString(9)));
+            }
         }
 
-        return items;
+        var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)searchParams.PageSize);
+        return new PublicPropertySearchResponse(
+            Items: items,
+            Page: searchParams.Page,
+            PageSize: searchParams.PageSize,
+            TotalItems: totalItems,
+            TotalPages: totalPages);
     }
 
     public async Task<PropertyRecord?> UpdateStatusAsync(
@@ -626,6 +691,34 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
         command.Parameters.AddWithValue("availableFrom", input.AvailableFrom);
         command.Parameters.AddWithValue("contractType", input.ContractType);
         command.Parameters.AddWithValue("status", input.Status);
+    }
+
+    private static void AddPublicSearchParameters(NpgsqlCommand command, PublicPropertySearchParams searchParams)
+    {
+        if (!string.IsNullOrWhiteSpace(searchParams.City))
+        {
+            command.Parameters.AddWithValue("city", searchParams.City);
+        }
+
+        if (searchParams.MinPrice.HasValue)
+        {
+            command.Parameters.AddWithValue("minPrice", searchParams.MinPrice.Value);
+        }
+
+        if (searchParams.MaxPrice.HasValue)
+        {
+            command.Parameters.AddWithValue("maxPrice", searchParams.MaxPrice.Value);
+        }
+
+        if (searchParams.Bedrooms.HasValue)
+        {
+            command.Parameters.AddWithValue("bedrooms", searchParams.Bedrooms.Value);
+        }
+
+        if (searchParams.IsFurnished.HasValue)
+        {
+            command.Parameters.AddWithValue("isFurnished", searchParams.IsFurnished.Value);
+        }
     }
 
     private static PropertyRecord ReadProperty(NpgsqlDataReader reader)

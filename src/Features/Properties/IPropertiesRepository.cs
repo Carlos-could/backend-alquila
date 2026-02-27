@@ -32,7 +32,9 @@ public interface IPropertiesRepository
 
     Task<IReadOnlyList<PropertyModerationQueueItemResponse>> ListPendingModerationAsync(CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<PublicPropertyListItemResponse>> ListPublishedForPublicAsync(CancellationToken cancellationToken);
+    Task<PublicPropertySearchResponse> SearchPublishedForPublicAsync(
+        PublicPropertySearchParams searchParams,
+        CancellationToken cancellationToken);
 
     Task<PropertyRecord?> UpdateStatusAsync(
         Guid propertyId,

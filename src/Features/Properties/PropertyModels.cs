@@ -146,6 +146,37 @@ public sealed record PublicPropertyListItemResponse(
     int Bathrooms,
     string? CoverImageUrl);
 
+public static class PublicPropertySortOptions
+{
+    public const string Newest = "newest";
+    public const string PriceAsc = "price_asc";
+    public const string PriceDesc = "price_desc";
+
+    public static readonly ISet<string> Allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        Newest,
+        PriceAsc,
+        PriceDesc
+    };
+}
+
+public sealed record PublicPropertySearchParams(
+    string? City,
+    decimal? MinPrice,
+    decimal? MaxPrice,
+    int? Bedrooms,
+    bool? IsFurnished,
+    string Sort,
+    int Page,
+    int PageSize);
+
+public sealed record PublicPropertySearchResponse(
+    IReadOnlyList<PublicPropertyListItemResponse> Items,
+    int Page,
+    int PageSize,
+    int TotalItems,
+    int TotalPages);
+
 public sealed record PropertyStatusHistoryRecord(
     Guid Id,
     Guid PropertyId,

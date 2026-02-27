@@ -208,11 +208,18 @@ public static class PropertyEndpoints
     }
 
     private static async Task<IResult> ListPublicPropertiesAsync(
+        HttpRequest request,
         IPropertiesRepository repository,
         CancellationToken cancellationToken)
     {
-        var items = await repository.ListPublishedForPublicAsync(cancellationToken);
-        return Results.Ok(items);
+        var parseResult = ParsePublicSearchParams(request.Query);
+        if (parseResult.Errors.Count > 0)
+        {
+            return Results.ValidationProblem(parseResult.Errors);
+        }
+
+        var result = await repository.SearchPublishedForPublicAsync(parseResult.Value!, cancellationToken);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> GetPropertyImagesAsync(
@@ -429,5 +436,136 @@ public static class PropertyEndpoints
         return Guid.TryParse(claimValue, out authUserId);
     }
 
+    private static PublicSearchParseResult ParsePublicSearchParams(IQueryCollection query)
+    {
+        var errors = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        var city = OptionalTrimmedQuery(query, "city");
+
+        var minPrice = ParseNonNegativeDecimal(query, "minPrice", errors);
+        var maxPrice = ParseNonNegativeDecimal(query, "maxPrice", errors);
+        if (minPrice.HasValue && maxPrice.HasValue && minPrice.Value > maxPrice.Value)
+        {
+            errors["maxPrice"] = new[] { "maxPrice must be greater than or equal to minPrice." };
+        }
+
+        var bedrooms = ParseNonNegativeInt(query, "bedrooms", errors);
+        var isFurnished = ParseBoolean(query, "isFurnished", errors);
+
+        var sort = OptionalTrimmedQuery(query, "sort") ?? PublicPropertySortOptions.Newest;
+        if (!PublicPropertySortOptions.Allowed.Contains(sort))
+        {
+            errors["sort"] = new[]
+            {
+                $"sort must be one of: {PublicPropertySortOptions.Newest}, {PublicPropertySortOptions.PriceAsc}, {PublicPropertySortOptions.PriceDesc}."
+            };
+        }
+
+        var page = ParsePositiveIntWithDefault(query, "page", 1, errors);
+        var pageSize = ParsePositiveIntWithDefault(query, "pageSize", 12, errors);
+        if (pageSize > 50)
+        {
+            errors["pageSize"] = new[] { "pageSize cannot be greater than 50." };
+        }
+
+        if (errors.Count > 0)
+        {
+            return new PublicSearchParseResult(null, errors);
+        }
+
+        return new PublicSearchParseResult(
+            new PublicPropertySearchParams(
+                City: city,
+                MinPrice: minPrice,
+                MaxPrice: maxPrice,
+                Bedrooms: bedrooms,
+                IsFurnished: isFurnished,
+                Sort: sort.ToLowerInvariant(),
+                Page: page,
+                PageSize: pageSize),
+            errors);
+    }
+
+    private static string? OptionalTrimmedQuery(IQueryCollection query, string key)
+    {
+        if (!query.TryGetValue(key, out var values))
+        {
+            return null;
+        }
+
+        var raw = values.ToString().Trim();
+        return string.IsNullOrWhiteSpace(raw) ? null : raw;
+    }
+
+    private static decimal? ParseNonNegativeDecimal(IQueryCollection query, string key, IDictionary<string, string[]> errors)
+    {
+        var raw = OptionalTrimmedQuery(query, key);
+        if (raw is null)
+        {
+            return null;
+        }
+
+        if (!decimal.TryParse(raw, out var value) || value < 0)
+        {
+            errors[key] = new[] { $"{key} must be a non-negative number." };
+            return null;
+        }
+
+        return value;
+    }
+
+    private static int? ParseNonNegativeInt(IQueryCollection query, string key, IDictionary<string, string[]> errors)
+    {
+        var raw = OptionalTrimmedQuery(query, key);
+        if (raw is null)
+        {
+            return null;
+        }
+
+        if (!int.TryParse(raw, out var value) || value < 0)
+        {
+            errors[key] = new[] { $"{key} must be a non-negative integer." };
+            return null;
+        }
+
+        return value;
+    }
+
+    private static int ParsePositiveIntWithDefault(IQueryCollection query, string key, int defaultValue, IDictionary<string, string[]> errors)
+    {
+        var raw = OptionalTrimmedQuery(query, key);
+        if (raw is null)
+        {
+            return defaultValue;
+        }
+
+        if (!int.TryParse(raw, out var value) || value <= 0)
+        {
+            errors[key] = new[] { $"{key} must be a positive integer." };
+            return defaultValue;
+        }
+
+        return value;
+    }
+
+    private static bool? ParseBoolean(IQueryCollection query, string key, IDictionary<string, string[]> errors)
+    {
+        var raw = OptionalTrimmedQuery(query, key);
+        if (raw is null)
+        {
+            return null;
+        }
+
+        if (!bool.TryParse(raw, out var value))
+        {
+            errors[key] = new[] { $"{key} must be true or false." };
+            return null;
+        }
+
+        return value;
+    }
+
     private sealed record PropertyWriteAccessResult(IResult? Result, PropertyRecord? Property);
+    private sealed record PublicSearchParseResult(
+        PublicPropertySearchParams? Value,
+        Dictionary<string, string[]> Errors);
 }
