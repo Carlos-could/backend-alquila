@@ -359,6 +359,199 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
         return await GetImagesByPropertyIdAsync(propertyId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<PropertyModerationQueueItemResponse>> ListPendingModerationAsync(CancellationToken cancellationToken)
+    {
+        const string sql = """
+            select id, owner_user_id, title, city, status, updated_at
+            from public.properties
+            where status = 'pendiente'
+            order by updated_at desc;
+            """;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var items = new List<PropertyModerationQueueItemResponse>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new PropertyModerationQueueItemResponse(
+                Id: reader.GetGuid(0),
+                OwnerUserId: reader.GetGuid(1),
+                Title: reader.GetString(2),
+                City: reader.GetString(3),
+                Status: reader.GetString(4),
+                UpdatedAt: reader.GetFieldValue<DateTimeOffset>(5)));
+        }
+
+        return items;
+    }
+
+    public async Task<IReadOnlyList<PublicPropertyListItemResponse>> ListPublishedForPublicAsync(CancellationToken cancellationToken)
+    {
+        const string sql = """
+            select p.id, p.title, p.description, p.city, p.neighborhood, p.address,
+                   p.monthly_price, p.bedrooms, p.bathrooms,
+                   (
+                     select i.public_url
+                     from public.property_images i
+                     where i.property_id = p.id
+                     order by i.display_order asc, i.created_at asc
+                     limit 1
+                   ) as cover_image_url
+            from public.properties p
+            where p.status = 'publicado'
+            order by p.updated_at desc;
+            """;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var items = new List<PublicPropertyListItemResponse>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new PublicPropertyListItemResponse(
+                Id: reader.GetGuid(0),
+                Title: reader.GetString(1),
+                Description: reader.IsDBNull(2) ? null : reader.GetString(2),
+                City: reader.GetString(3),
+                Neighborhood: reader.IsDBNull(4) ? null : reader.GetString(4),
+                Address: reader.IsDBNull(5) ? null : reader.GetString(5),
+                MonthlyPrice: reader.GetDecimal(6),
+                Bedrooms: reader.GetInt32(7),
+                Bathrooms: reader.GetInt32(8),
+                CoverImageUrl: reader.IsDBNull(9) ? null : reader.GetString(9)));
+        }
+
+        return items;
+    }
+
+    public async Task<PropertyRecord?> UpdateStatusAsync(
+        Guid propertyId,
+        string newStatus,
+        Guid? changedByUserId,
+        string changedByRole,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        const string getSql = """
+            select id, owner_user_id, title, description, city, neighborhood, address,
+                   monthly_price, deposit_amount, bedrooms, bathrooms, area_m2,
+                   is_furnished, available_from, contract_type, status,
+                   created_at, updated_at
+            from public.properties
+            where id = @id
+            limit 1;
+            """;
+
+        PropertyRecord? current;
+        await using (var getCommand = new NpgsqlCommand(getSql, connection, transaction))
+        {
+            getCommand.Parameters.AddWithValue("id", propertyId);
+            await using var reader = await getCommand.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            current = ReadProperty(reader);
+        }
+
+        if (string.Equals(current.Status, newStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return current;
+        }
+
+        const string updateSql = """
+            update public.properties
+            set status = @status, updated_at = now()
+            where id = @id
+            returning id, owner_user_id, title, description, city, neighborhood, address,
+                      monthly_price, deposit_amount, bedrooms, bathrooms, area_m2,
+                      is_furnished, available_from, contract_type, status,
+                      created_at, updated_at;
+            """;
+
+        PropertyRecord updated;
+        await using (var updateCommand = new NpgsqlCommand(updateSql, connection, transaction))
+        {
+            updateCommand.Parameters.AddWithValue("status", newStatus);
+            updateCommand.Parameters.AddWithValue("id", propertyId);
+            await using var reader = await updateCommand.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            updated = ReadProperty(reader);
+        }
+
+        const string historySql = """
+            insert into public.property_status_history (
+                property_id,
+                previous_status,
+                new_status,
+                changed_by_user_id,
+                changed_by_role,
+                reason
+            )
+            values (
+                @propertyId,
+                @previousStatus,
+                @newStatus,
+                @changedByUserId,
+                @changedByRole,
+                @reason
+            );
+            """;
+
+        await using (var historyCommand = new NpgsqlCommand(historySql, connection, transaction))
+        {
+            historyCommand.Parameters.AddWithValue("propertyId", propertyId);
+            historyCommand.Parameters.AddWithValue("previousStatus", current.Status);
+            historyCommand.Parameters.AddWithValue("newStatus", newStatus);
+            historyCommand.Parameters.AddWithValue("changedByUserId", (object?)changedByUserId ?? DBNull.Value);
+            historyCommand.Parameters.AddWithValue("changedByRole", changedByRole);
+            historyCommand.Parameters.AddWithValue("reason", (object?)reason ?? DBNull.Value);
+            await historyCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return updated;
+    }
+
+    public async Task<IReadOnlyList<PropertyStatusHistoryRecord>> GetStatusHistoryAsync(Guid propertyId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            select id, property_id, previous_status, new_status, changed_by_user_id, changed_by_role, reason, changed_at
+            from public.property_status_history
+            where property_id = @propertyId
+            order by changed_at desc;
+            """;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("propertyId", propertyId);
+
+        var items = new List<PropertyStatusHistoryRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new PropertyStatusHistoryRecord(
+                Id: reader.GetGuid(0),
+                PropertyId: reader.GetGuid(1),
+                PreviousStatus: reader.GetString(2),
+                NewStatus: reader.GetString(3),
+                ChangedByUserId: reader.IsDBNull(4) ? null : reader.GetGuid(4),
+                ChangedByRole: reader.GetString(5),
+                Reason: reader.IsDBNull(6) ? null : reader.GetString(6),
+                ChangedAt: reader.GetFieldValue<DateTimeOffset>(7)));
+        }
+
+        return items;
+    }
+
     private async Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken cancellationToken)
     {
         var connection = new NpgsqlConnection(_connectionString);

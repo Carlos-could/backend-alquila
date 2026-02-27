@@ -203,3 +203,24 @@ Evidencia:
   - Cliente de galeria en `frontend-alquila/src/features/properties/api.ts`.
   - UI de carga/orden/errores en `frontend-alquila/src/features/properties/property-management-panel.tsx`.
   - Verificacion local FE: `npm run lint`, `npm run typecheck`, `npm run build`.
+
+### F2-T04 - Moderacion basica de anuncios
+Prioridad: P1
+Objetivo: controlar calidad minima del inventario.
+Scope: FULLSTACK
+Estado: BE: Done | FE: Done
+Evidencia:
+- Backend:
+  - Accion de moderacion admin implementada en `src/Features/Properties/PropertyEndpoints.cs`:
+    - `PATCH /properties/{id}/moderation`
+    - `GET /properties/moderation/pending`
+    - `GET /properties/{id}/status-history`
+  - Historial de cambios de estado registrado en `database/migrations/0004_property_status_history.up.sql`.
+  - Persistencia de historial/estado en `src/Features/Properties/NpgsqlPropertiesRepository.cs`.
+  - Listado publico restringido a `publicado` en `GET /properties/public`.
+  - Pruebas de moderacion y listado publico en `tests/Backend.Alquila.Tests/PropertiesAuthorizationIntegrationTests.cs`.
+- Frontend:
+  - Panel admin de aprobacion/rechazo en `frontend-alquila/src/features/properties/admin-moderation-panel.tsx`.
+  - Integracion de panel admin en `frontend-alquila/src/app/admin/page.tsx`.
+  - Home publico conectado a `GET /properties/public` en `frontend-alquila/src/app/page.tsx`.
+  - Validacion local FE: `npm run lint`, `npm run typecheck`, `npm run build`.

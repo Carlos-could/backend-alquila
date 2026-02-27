@@ -123,6 +123,58 @@ public sealed class PropertiesAuthorizationIntegrationTests : IClassFixture<Prop
     }
 
     [Fact]
+    public async Task ModerateProperty_WithAdminRole_ReturnsOk()
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, "admin");
+
+        var response = await client.PatchAsJsonAsync($"/properties/{InMemoryPropertiesRepository.OwnedPropertyId}/moderation", new
+        {
+            status = "publicado",
+            reason = "Validado por admin"
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ModerateProperty_WithPropietarioRole_ReturnsForbidden()
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, "propietario");
+
+        var response = await client.PatchAsJsonAsync($"/properties/{InMemoryPropertiesRepository.OwnedPropertyId}/moderation", new
+        {
+            status = "publicado"
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicListing_DoesNotRequireAuth_AndReturnsOnlyPublicado()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/properties/public");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var items = await response.Content.ReadFromJsonAsync<List<PublicPropertyListItemResponse>>();
+        Assert.NotNull(items);
+        Assert.All(items!, item => Assert.Equal("Publicado por admin", item.Title));
+    }
+
+    [Fact]
+    public async Task PublicListing_WithApiV1Prefix_ReturnsOk()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/v1/properties/public");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task UploadPropertyImages_WithInquilinoRole_ReturnsForbidden()
     {
         using var client = _factory.CreateClient();
@@ -205,6 +257,7 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
     private readonly Dictionary<Guid, Guid> _usersByAuthUserId = new();
     private readonly Dictionary<Guid, PropertyRecord> _propertiesById = new();
     private readonly Dictionary<Guid, List<PropertyImageRecord>> _imagesByPropertyId = new();
+    private readonly Dictionary<Guid, List<PropertyStatusHistoryRecord>> _statusHistoryByPropertyId = new();
 
     public InMemoryPropertiesRepository()
     {
@@ -228,6 +281,26 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
             AvailableFrom: DateOnly.FromDateTime(DateTime.UtcNow.Date),
             ContractType: "long_term",
             Status: "pendiente",
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow);
+
+        _propertiesById[Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd")] = new PropertyRecord(
+            Id: Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+            OwnerUserId: OwnerUserId,
+            Title: "Publicado por admin",
+            Description: "Desc",
+            City: "Madrid",
+            Neighborhood: "Centro",
+            Address: "Calle 2",
+            MonthlyPrice: 1500,
+            DepositAmount: 1200,
+            Bedrooms: 2,
+            Bathrooms: 1,
+            AreaM2: 80,
+            IsFurnished: true,
+            AvailableFrom: DateOnly.FromDateTime(DateTime.UtcNow.Date),
+            ContractType: "long_term",
+            Status: "publicado",
             CreatedAt: DateTimeOffset.UtcNow,
             UpdatedAt: DateTimeOffset.UtcNow);
     }
@@ -390,6 +463,99 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
             var updated = imageMap.Values.OrderBy(image => image.DisplayOrder).ToList();
             _imagesByPropertyId[propertyId] = updated;
             return Task.FromResult<IReadOnlyList<PropertyImageRecord>>(updated);
+        }
+    }
+
+    public Task<IReadOnlyList<PropertyModerationQueueItemResponse>> ListPendingModerationAsync(CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var pending = _propertiesById.Values
+                .Where(property => property.Status == "pendiente")
+                .Select(property => new PropertyModerationQueueItemResponse(
+                    Id: property.Id,
+                    OwnerUserId: property.OwnerUserId,
+                    Title: property.Title,
+                    City: property.City,
+                    Status: property.Status,
+                    UpdatedAt: property.UpdatedAt))
+                .ToList();
+            return Task.FromResult<IReadOnlyList<PropertyModerationQueueItemResponse>>(pending);
+        }
+    }
+
+    public Task<IReadOnlyList<PublicPropertyListItemResponse>> ListPublishedForPublicAsync(CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var published = _propertiesById.Values
+                .Where(property => property.Status == "publicado")
+                .Select(property => new PublicPropertyListItemResponse(
+                    Id: property.Id,
+                    Title: property.Title,
+                    Description: property.Description,
+                    City: property.City,
+                    Neighborhood: property.Neighborhood,
+                    Address: property.Address,
+                    MonthlyPrice: property.MonthlyPrice,
+                    Bedrooms: property.Bedrooms,
+                    Bathrooms: property.Bathrooms,
+                    CoverImageUrl: null))
+                .ToList();
+            return Task.FromResult<IReadOnlyList<PublicPropertyListItemResponse>>(published);
+        }
+    }
+
+    public Task<PropertyRecord?> UpdateStatusAsync(
+        Guid propertyId,
+        string newStatus,
+        Guid? changedByUserId,
+        string changedByRole,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            if (!_propertiesById.TryGetValue(propertyId, out var property))
+            {
+                return Task.FromResult<PropertyRecord?>(null);
+            }
+
+            var updated = property with
+            {
+                Status = newStatus,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            _propertiesById[propertyId] = updated;
+
+            if (!_statusHistoryByPropertyId.TryGetValue(propertyId, out var history))
+            {
+                history = new List<PropertyStatusHistoryRecord>();
+                _statusHistoryByPropertyId[propertyId] = history;
+            }
+
+            history.Add(new PropertyStatusHistoryRecord(
+                Id: Guid.NewGuid(),
+                PropertyId: propertyId,
+                PreviousStatus: property.Status,
+                NewStatus: newStatus,
+                ChangedByUserId: changedByUserId,
+                ChangedByRole: changedByRole,
+                Reason: reason,
+                ChangedAt: DateTimeOffset.UtcNow));
+
+            return Task.FromResult<PropertyRecord?>(updated);
+        }
+    }
+
+    public Task<IReadOnlyList<PropertyStatusHistoryRecord>> GetStatusHistoryAsync(Guid propertyId, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var items = _statusHistoryByPropertyId.TryGetValue(propertyId, out var history)
+                ? history.OrderByDescending(entry => entry.ChangedAt).ToList()
+                : new List<PropertyStatusHistoryRecord>();
+            return Task.FromResult<IReadOnlyList<PropertyStatusHistoryRecord>>(items);
         }
     }
 }

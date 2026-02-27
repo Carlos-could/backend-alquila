@@ -98,6 +98,7 @@ app.MapGet("/inquilino", () => Results.Ok(new { area = "inquilino", access = "gr
     .RequireAuthorization(AuthorizationPolicies.InquilinoOnly);
 
 app.MapPropertyEndpoints();
+app.MapGroup("/api/v1").MapPropertyEndpoints();
 
 app.Run();
 

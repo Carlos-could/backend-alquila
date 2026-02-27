@@ -122,6 +122,50 @@ public sealed record PropertyImageOrderItemRequest(
 public sealed record PropertyImageOrderPatchRequest(
     IReadOnlyList<PropertyImageOrderItemRequest> Items);
 
+public sealed record PropertyModerationRequest(
+    string Status,
+    string? Reason);
+
+public sealed record PropertyModerationQueueItemResponse(
+    Guid Id,
+    Guid OwnerUserId,
+    string Title,
+    string City,
+    string Status,
+    DateTimeOffset UpdatedAt);
+
+public sealed record PublicPropertyListItemResponse(
+    Guid Id,
+    string Title,
+    string? Description,
+    string City,
+    string? Neighborhood,
+    string? Address,
+    decimal MonthlyPrice,
+    int Bedrooms,
+    int Bathrooms,
+    string? CoverImageUrl);
+
+public sealed record PropertyStatusHistoryRecord(
+    Guid Id,
+    Guid PropertyId,
+    string PreviousStatus,
+    string NewStatus,
+    Guid? ChangedByUserId,
+    string ChangedByRole,
+    string? Reason,
+    DateTimeOffset ChangedAt);
+
+public sealed record PropertyStatusHistoryResponse(
+    Guid Id,
+    Guid PropertyId,
+    string PreviousStatus,
+    string NewStatus,
+    Guid? ChangedByUserId,
+    string ChangedByRole,
+    string? Reason,
+    DateTimeOffset ChangedAt);
+
 public static class PropertyMappings
 {
     public static NormalizedPropertyCreateInput NormalizeForCreate(PropertyUpsertRequest request) =>
@@ -188,6 +232,17 @@ public static class PropertyMappings
             image.FileSizeBytes,
             image.DisplayOrder,
             image.CreatedAt);
+
+    public static PropertyStatusHistoryResponse ToStatusHistoryResponse(PropertyStatusHistoryRecord record) =>
+        new(
+            record.Id,
+            record.PropertyId,
+            record.PreviousStatus,
+            record.NewStatus,
+            record.ChangedByUserId,
+            record.ChangedByRole,
+            record.Reason,
+            record.ChangedAt);
 
     private static string? OptionalText(string raw)
     {

@@ -29,4 +29,18 @@ public interface IPropertiesRepository
         Guid propertyId,
         IReadOnlyList<PropertyImageOrderItemRequest> items,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PropertyModerationQueueItemResponse>> ListPendingModerationAsync(CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PublicPropertyListItemResponse>> ListPublishedForPublicAsync(CancellationToken cancellationToken);
+
+    Task<PropertyRecord?> UpdateStatusAsync(
+        Guid propertyId,
+        string newStatus,
+        Guid? changedByUserId,
+        string changedByRole,
+        string? reason,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PropertyStatusHistoryRecord>> GetStatusHistoryAsync(Guid propertyId, CancellationToken cancellationToken);
 }

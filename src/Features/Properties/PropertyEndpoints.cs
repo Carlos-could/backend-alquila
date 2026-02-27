@@ -16,10 +16,16 @@ public static class PropertyEndpoints
 
     public static IEndpointRouteBuilder MapPropertyEndpoints(this IEndpointRouteBuilder app)
     {
+        var publicGroup = app.MapGroup("/properties");
+        publicGroup.MapGet("/public", ListPublicPropertiesAsync);
+
         var group = app.MapGroup("/properties").RequireAuthorization();
 
         group.MapPost("/", CreatePropertyAsync);
         group.MapPatch("/{id:guid}", PatchPropertyAsync);
+        group.MapGet("/moderation/pending", ListPendingModerationAsync);
+        group.MapPatch("/{id:guid}/moderation", ModeratePropertyStatusAsync);
+        group.MapGet("/{id:guid}/status-history", GetPropertyStatusHistoryAsync);
         group.MapGet("/{id:guid}/images", GetPropertyImagesAsync);
         group.MapPost("/{id:guid}/images", UploadPropertyImagesAsync).DisableAntiforgery();
         group.MapPatch("/{id:guid}/images/order", PatchPropertyImageOrderAsync);
@@ -121,6 +127,92 @@ public static class PropertyEndpoints
         }
 
         return Results.Ok(PropertyMappings.ToResponse(updated));
+    }
+
+    private static async Task<IResult> ListPendingModerationAsync(
+        ClaimsPrincipal user,
+        IPropertiesRepository repository,
+        CancellationToken cancellationToken)
+    {
+        if (!RoleClaimResolver.IsInAnyRole(user, UserRoles.Admin))
+        {
+            return Results.Forbid();
+        }
+
+        var pending = await repository.ListPendingModerationAsync(cancellationToken);
+        return Results.Ok(pending);
+    }
+
+    private static async Task<IResult> ModeratePropertyStatusAsync(
+        Guid id,
+        ClaimsPrincipal user,
+        PropertyModerationRequest request,
+        IPropertiesRepository repository,
+        CancellationToken cancellationToken)
+    {
+        if (!RoleClaimResolver.IsInAnyRole(user, UserRoles.Admin))
+        {
+            return Results.Forbid();
+        }
+
+        var normalizedStatus = request.Status.Trim().ToLowerInvariant();
+        if (normalizedStatus is not PropertyStatuses.Publicado and not PropertyStatuses.Rechazado)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["status"] = new[] { "status must be one of: publicado, rechazado." }
+            });
+        }
+
+        Guid? changedByUserId = null;
+        if (TryGetAuthUserId(user, out var authUserId))
+        {
+            changedByUserId = await repository.FindUserIdByAuthUserIdAsync(authUserId, cancellationToken);
+        }
+
+        var updated = await repository.UpdateStatusAsync(
+            propertyId: id,
+            newStatus: normalizedStatus,
+            changedByUserId: changedByUserId,
+            changedByRole: UserRoles.Admin,
+            reason: string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(),
+            cancellationToken: cancellationToken);
+
+        if (updated is null)
+        {
+            return Results.NotFound();
+        }
+
+        return Results.Ok(PropertyMappings.ToResponse(updated));
+    }
+
+    private static async Task<IResult> GetPropertyStatusHistoryAsync(
+        Guid id,
+        ClaimsPrincipal user,
+        IPropertiesRepository repository,
+        CancellationToken cancellationToken)
+    {
+        if (!RoleClaimResolver.IsInAnyRole(user, UserRoles.Admin))
+        {
+            return Results.Forbid();
+        }
+
+        var property = await repository.GetByIdAsync(id, cancellationToken);
+        if (property is null)
+        {
+            return Results.NotFound();
+        }
+
+        var history = await repository.GetStatusHistoryAsync(id, cancellationToken);
+        return Results.Ok(history.Select(PropertyMappings.ToStatusHistoryResponse));
+    }
+
+    private static async Task<IResult> ListPublicPropertiesAsync(
+        IPropertiesRepository repository,
+        CancellationToken cancellationToken)
+    {
+        var items = await repository.ListPublishedForPublicAsync(cancellationToken);
+        return Results.Ok(items);
     }
 
     private static async Task<IResult> GetPropertyImagesAsync(
