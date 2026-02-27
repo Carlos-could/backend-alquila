@@ -4,6 +4,7 @@ namespace Backend.Alquila.Features.Properties;
 
 public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
 {
+    private const int MaxTransientRetries = 2;
     private readonly string _connectionString;
 
     public NpgsqlPropertiesRepository()
@@ -18,19 +19,22 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
 
     public async Task<Guid?> FindUserIdByAuthUserIdAsync(Guid authUserId, CancellationToken cancellationToken)
     {
-        const string sql = """
-            select id
-            from public.users
-            where auth_user_id = @authUserId
-            limit 1;
-            """;
+        return await ExecuteWithTransientRetryAsync(async token =>
+        {
+            const string sql = """
+                select id
+                from public.users
+                where auth_user_id = @authUserId
+                limit 1;
+                """;
 
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("authUserId", authUserId);
+            await using var connection = await OpenConnectionAsync(token);
+            await using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("authUserId", authUserId);
 
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return scalar is Guid id ? id : null;
+            var scalar = await command.ExecuteScalarAsync(token);
+            return scalar is Guid id ? (Guid?)id : null;
+        }, cancellationToken);
     }
 
     public async Task<PropertyRecord?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
@@ -63,54 +67,57 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
         NormalizedPropertyCreateInput input,
         CancellationToken cancellationToken)
     {
-        const string sql = """
-            insert into public.properties (
-                owner_user_id,
-                title,
-                description,
-                city,
-                neighborhood,
-                address,
-                monthly_price,
-                deposit_amount,
-                bedrooms,
-                bathrooms,
-                area_m2,
-                is_furnished,
-                available_from,
-                contract_type,
-                status
-            )
-            values (
-                @ownerUserId,
-                @title,
-                @description,
-                @city,
-                @neighborhood,
-                @address,
-                @monthlyPrice,
-                @depositAmount,
-                @bedrooms,
-                @bathrooms,
-                @areaM2,
-                @isFurnished,
-                @availableFrom,
-                @contractType,
-                @status
-            )
-            returning id, owner_user_id, title, description, city, neighborhood, address,
-                      monthly_price, deposit_amount, bedrooms, bathrooms, area_m2,
-                      is_furnished, available_from, contract_type, status,
-                      created_at, updated_at;
-            """;
+        return await ExecuteWithTransientRetryAsync(async token =>
+        {
+            const string sql = """
+                insert into public.properties (
+                    owner_user_id,
+                    title,
+                    description,
+                    city,
+                    neighborhood,
+                    address,
+                    monthly_price,
+                    deposit_amount,
+                    bedrooms,
+                    bathrooms,
+                    area_m2,
+                    is_furnished,
+                    available_from,
+                    contract_type,
+                    status
+                )
+                values (
+                    @ownerUserId,
+                    @title,
+                    @description,
+                    @city,
+                    @neighborhood,
+                    @address,
+                    @monthlyPrice,
+                    @depositAmount,
+                    @bedrooms,
+                    @bathrooms,
+                    @areaM2,
+                    @isFurnished,
+                    @availableFrom,
+                    @contractType,
+                    @status
+                )
+                returning id, owner_user_id, title, description, city, neighborhood, address,
+                          monthly_price, deposit_amount, bedrooms, bathrooms, area_m2,
+                          is_furnished, available_from, contract_type, status,
+                          created_at, updated_at;
+                """;
 
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        AddCreateParameters(command, ownerUserId, input);
+            await using var connection = await OpenConnectionAsync(token);
+            await using var command = new NpgsqlCommand(sql, connection);
+            AddCreateParameters(command, ownerUserId, input);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        await reader.ReadAsync(cancellationToken);
-        return ReadProperty(reader);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            await reader.ReadAsync(token);
+            return ReadProperty(reader);
+        }, cancellationToken);
     }
 
     public async Task<PropertyRecord?> UpdateAsync(Guid id, NormalizedPropertyPatchInput input, CancellationToken cancellationToken)
@@ -557,6 +564,49 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
         var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         return connection;
+    }
+
+    private static bool IsTransient(Exception exception)
+    {
+        if (exception is TimeoutException)
+        {
+            return true;
+        }
+
+        if (exception is NpgsqlException npgsqlException)
+        {
+            if (npgsqlException.InnerException is TimeoutException)
+            {
+                return true;
+            }
+
+            // SQLSTATE class 08 => connection exception
+            if (!string.IsNullOrWhiteSpace(npgsqlException.SqlState) &&
+                npgsqlException.SqlState.StartsWith("08", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<T> ExecuteWithTransientRetryAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await operation(cancellationToken);
+            }
+            catch (Exception exception) when (attempt < MaxTransientRetries && IsTransient(exception))
+            {
+                var delayMs = (attempt + 1) * 250;
+                await Task.Delay(delayMs, cancellationToken);
+            }
+        }
     }
 
     private static void AddCreateParameters(NpgsqlCommand command, Guid ownerUserId, NormalizedPropertyCreateInput input)
