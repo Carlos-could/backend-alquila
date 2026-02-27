@@ -8,6 +8,7 @@ Este modelo prepara las entidades base del MVP y sirve como contrato inicial par
 - `properties`: inmuebles publicados por propietarios con datos completos de publicacion.
 - `applications`: postulaciones de inquilinos a inmuebles.
 - `documents`: archivos/documentos asociados al inquilino o a una solicitud.
+- `property_images`: imagenes de inmuebles con orden de visualizacion para galeria.
 - `messages`: mensajes entre partes dentro del contexto de una solicitud.
 - `deals`: cierre de operacion asociado a una solicitud aceptada.
 
@@ -19,6 +20,7 @@ erDiagram
     USERS ||--o{ APPLICATIONS : submits
     PROPERTIES ||--o{ APPLICATIONS : receives
     USERS ||--o{ DOCUMENTS : uploads
+    PROPERTIES ||--o{ PROPERTY_IMAGES : has_gallery
     APPLICATIONS ||--o{ DOCUMENTS : references
     APPLICATIONS ||--o{ MESSAGES : contains
     USERS ||--o{ MESSAGES : sends
@@ -55,6 +57,8 @@ Indices para busqueda:
 - `database/migrations/0001_initial_schema.down.sql`
 - `database/migrations/0002_properties_full_entity.up.sql`
 - `database/migrations/0002_properties_full_entity.down.sql`
+- `database/migrations/0003_property_images.up.sql`
+- `database/migrations/0003_property_images.down.sql`
 
 Comandos:
 

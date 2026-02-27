@@ -15,4 +15,18 @@ public interface IPropertiesRepository
         Guid id,
         NormalizedPropertyPatchInput input,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PropertyImageRecord>> GetImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken);
+
+    Task<int> CountImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PropertyImageRecord>> AddImagesAsync(
+        Guid propertyId,
+        IReadOnlyList<NewPropertyImageInput> images,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PropertyImageRecord>> UpdateImageOrderAsync(
+        Guid propertyId,
+        IReadOnlyList<PropertyImageOrderItemRequest> items,
+        CancellationToken cancellationToken);
 }

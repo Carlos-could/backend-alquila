@@ -4,6 +4,7 @@ using Backend.Alquila.Features.Properties;
 using Backend.Alquila.Infrastructure.Configuration;
 using Backend.Alquila.Infrastructure.Persistence.Migrations;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,8 @@ if (!string.IsNullOrWhiteSpace(assignedPort))
 {
     builder.WebHost.UseUrls($"http://0.0.0.0:{assignedPort}");
 }
+
+Directory.CreateDirectory(Path.Combine(builder.Environment.ContentRootPath, "uploads"));
 
 if (MigrationRunner.IsMigrationCommand(args))
 {
@@ -59,10 +62,17 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddProblemDetails();
 builder.Services.AddScoped<IPropertiesRepository, NpgsqlPropertiesRepository>();
+builder.Services.AddSingleton<IPropertyImageStorage, LocalPropertyImageStorage>();
 
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(Path.Combine(builder.Environment.ContentRootPath, "uploads")),
+    RequestPath = "/uploads"
+});
 app.UseAuthentication();
 app.UseAuthorization();
 

@@ -89,6 +89,39 @@ public sealed record NormalizedPropertyPatchInput(
         Status is not null;
 }
 
+public sealed record NewPropertyImageInput(
+    string StoragePath,
+    string PublicUrl,
+    string MimeType,
+    int FileSizeBytes,
+    int DisplayOrder);
+
+public sealed record PropertyImageRecord(
+    Guid Id,
+    Guid PropertyId,
+    string StoragePath,
+    string PublicUrl,
+    string MimeType,
+    int FileSizeBytes,
+    int DisplayOrder,
+    DateTimeOffset CreatedAt);
+
+public sealed record PropertyImageResponse(
+    Guid Id,
+    Guid PropertyId,
+    string PublicUrl,
+    string MimeType,
+    int FileSizeBytes,
+    int DisplayOrder,
+    DateTimeOffset CreatedAt);
+
+public sealed record PropertyImageOrderItemRequest(
+    Guid ImageId,
+    int DisplayOrder);
+
+public sealed record PropertyImageOrderPatchRequest(
+    IReadOnlyList<PropertyImageOrderItemRequest> Items);
+
 public static class PropertyMappings
 {
     public static NormalizedPropertyCreateInput NormalizeForCreate(PropertyUpsertRequest request) =>
@@ -145,6 +178,16 @@ public static class PropertyMappings
             property.Status,
             property.CreatedAt,
             property.UpdatedAt);
+
+    public static PropertyImageResponse ToImageResponse(PropertyImageRecord image) =>
+        new(
+            image.Id,
+            image.PropertyId,
+            image.PublicUrl,
+            image.MimeType,
+            image.FileSizeBytes,
+            image.DisplayOrder,
+            image.CreatedAt);
 
     private static string? OptionalText(string raw)
     {

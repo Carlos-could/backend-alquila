@@ -230,6 +230,135 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
         return ReadProperty(reader);
     }
 
+    public async Task<IReadOnlyList<PropertyImageRecord>> GetImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            select id, property_id, storage_path, public_url, mime_type, file_size_bytes, display_order, created_at
+            from public.property_images
+            where property_id = @propertyId
+            order by display_order asc, created_at asc;
+            """;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("propertyId", propertyId);
+
+        var images = new List<PropertyImageRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            images.Add(ReadImage(reader));
+        }
+
+        return images;
+    }
+
+    public async Task<int> CountImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            select count(*)
+            from public.property_images
+            where property_id = @propertyId;
+            """;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("propertyId", propertyId);
+
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        return scalar is long count ? checked((int)count) : 0;
+    }
+
+    public async Task<IReadOnlyList<PropertyImageRecord>> AddImagesAsync(
+        Guid propertyId,
+        IReadOnlyList<NewPropertyImageInput> images,
+        CancellationToken cancellationToken)
+    {
+        if (images.Count == 0)
+        {
+            return Array.Empty<PropertyImageRecord>();
+        }
+
+        const string sql = """
+            insert into public.property_images (
+                property_id,
+                storage_path,
+                public_url,
+                mime_type,
+                file_size_bytes,
+                display_order
+            )
+            values (
+                @propertyId,
+                @storagePath,
+                @publicUrl,
+                @mimeType,
+                @fileSizeBytes,
+                @displayOrder
+            )
+            returning id, property_id, storage_path, public_url, mime_type, file_size_bytes, display_order, created_at;
+            """;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        var created = new List<PropertyImageRecord>(images.Count);
+        foreach (var image in images)
+        {
+            await using var command = new NpgsqlCommand(sql, connection, transaction);
+            command.Parameters.AddWithValue("propertyId", propertyId);
+            command.Parameters.AddWithValue("storagePath", image.StoragePath);
+            command.Parameters.AddWithValue("publicUrl", image.PublicUrl);
+            command.Parameters.AddWithValue("mimeType", image.MimeType);
+            command.Parameters.AddWithValue("fileSizeBytes", image.FileSizeBytes);
+            command.Parameters.AddWithValue("displayOrder", image.DisplayOrder);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            created.Add(ReadImage(reader));
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return created;
+    }
+
+    public async Task<IReadOnlyList<PropertyImageRecord>> UpdateImageOrderAsync(
+        Guid propertyId,
+        IReadOnlyList<PropertyImageOrderItemRequest> items,
+        CancellationToken cancellationToken)
+    {
+        if (items.Count == 0)
+        {
+            return await GetImagesByPropertyIdAsync(propertyId, cancellationToken);
+        }
+
+        const string sql = """
+            update public.property_images
+            set display_order = @displayOrder
+            where id = @imageId and property_id = @propertyId;
+            """;
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            await using var command = new NpgsqlCommand(sql, connection, transaction);
+            command.Parameters.AddWithValue("displayOrder", item.DisplayOrder);
+            command.Parameters.AddWithValue("imageId", item.ImageId);
+            command.Parameters.AddWithValue("propertyId", propertyId);
+
+            var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (affected == 0)
+            {
+                throw new InvalidOperationException($"Image '{item.ImageId}' does not belong to property '{propertyId}'.");
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return await GetImagesByPropertyIdAsync(propertyId, cancellationToken);
+    }
+
     private async Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken cancellationToken)
     {
         var connection = new NpgsqlConnection(_connectionString);
@@ -277,5 +406,18 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
             Status: reader.GetString(15),
             CreatedAt: reader.GetFieldValue<DateTimeOffset>(16),
             UpdatedAt: reader.GetFieldValue<DateTimeOffset>(17));
+    }
+
+    private static PropertyImageRecord ReadImage(NpgsqlDataReader reader)
+    {
+        return new PropertyImageRecord(
+            Id: reader.GetGuid(0),
+            PropertyId: reader.GetGuid(1),
+            StoragePath: reader.GetString(2),
+            PublicUrl: reader.GetString(3),
+            MimeType: reader.GetString(4),
+            FileSizeBytes: reader.GetInt32(5),
+            DisplayOrder: reader.GetInt32(6),
+            CreatedAt: reader.GetFieldValue<DateTimeOffset>(7));
     }
 }

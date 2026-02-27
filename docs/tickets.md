@@ -183,3 +183,23 @@ Evidencia:
   - Panel de propietario para crear/editar inmuebles en `frontend-alquila/src/features/properties/property-management-panel.tsx`.
   - Integracion de la ruta protegida en `frontend-alquila/src/app/propietario/page.tsx`.
   - Validacion local FE: `npm run lint`, `npm run typecheck`, `npm run build`.
+
+### F2-T03 - Carga de imagenes
+Prioridad: P0
+Objetivo: permitir fotos en publicacion.
+Scope: FULLSTACK
+Estado: BE: Done | FE: Done
+Evidencia:
+- Backend:
+  - Migracion de galeria implementada en `database/migrations/0003_property_images.up.sql` y rollback en `database/migrations/0003_property_images.down.sql`.
+  - Endpoints implementados en `src/Features/Properties/PropertyEndpoints.cs`:
+    - `GET /properties/{id}/images`
+    - `POST /properties/{id}/images`
+    - `PATCH /properties/{id}/images/order`
+  - Validaciones de subida: formato (`image/jpeg`, `image/png`, `image/webp`), tamano maximo (5 MB) y limite total por inmueble (15).
+  - Persistencia de imagenes y orden en `src/Features/Properties/NpgsqlPropertiesRepository.cs`.
+  - Pruebas de autorizacion/errores de subida en `tests/Backend.Alquila.Tests/PropertiesAuthorizationIntegrationTests.cs`.
+- Frontend:
+  - Cliente de galeria en `frontend-alquila/src/features/properties/api.ts`.
+  - UI de carga/orden/errores en `frontend-alquila/src/features/properties/property-management-panel.tsx`.
+  - Verificacion local FE: `npm run lint`, `npm run typecheck`, `npm run build`.

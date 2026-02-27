@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authentication;
 using Backend.Alquila.Features.Properties;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -120,6 +121,40 @@ public sealed class PropertiesAuthorizationIntegrationTests : IClassFixture<Prop
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    [Fact]
+    public async Task UploadPropertyImages_WithInquilinoRole_ReturnsForbidden()
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, "inquilino");
+
+        using var content = BuildMultipartImage("image/png");
+        var response = await client.PostAsync($"/properties/{InMemoryPropertiesRepository.OwnedPropertyId}/images", content);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UploadPropertyImages_WithInvalidFormat_ReturnsBadRequest()
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, "propietario");
+
+        using var content = BuildMultipartImage("text/plain");
+        var response = await client.PostAsync($"/properties/{InMemoryPropertiesRepository.OwnedPropertyId}/images", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private static MultipartFormDataContent BuildMultipartImage(string contentType)
+    {
+        var content = new MultipartFormDataContent();
+        var bytes = new byte[] { 137, 80, 78, 71 };
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        content.Add(file, "files", "sample.png");
+        return content;
+    }
 }
 
 public sealed class PropertiesTestApplicationFactory : WebApplicationFactory<Program>
@@ -140,7 +175,21 @@ public sealed class PropertiesTestApplicationFactory : WebApplicationFactory<Pro
 
             services.RemoveAll<IPropertiesRepository>();
             services.AddSingleton<IPropertiesRepository, InMemoryPropertiesRepository>();
+            services.RemoveAll<IPropertyImageStorage>();
+            services.AddSingleton<IPropertyImageStorage, InMemoryPropertyImageStorage>();
         });
+    }
+}
+
+public sealed class InMemoryPropertyImageStorage : IPropertyImageStorage
+{
+    public Task<StoredPropertyImageFile> SaveAsync(Guid propertyId, IFormFile file, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new StoredPropertyImageFile(
+            StoragePath: $"uploads/properties/{propertyId:N}/{Guid.NewGuid():N}.png",
+            PublicUrl: $"/uploads/properties/{propertyId:N}/{Guid.NewGuid():N}.png",
+            MimeType: file.ContentType,
+            FileSizeBytes: checked((int)file.Length)));
     }
 }
 
@@ -155,6 +204,7 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
     private readonly object _gate = new();
     private readonly Dictionary<Guid, Guid> _usersByAuthUserId = new();
     private readonly Dictionary<Guid, PropertyRecord> _propertiesById = new();
+    private readonly Dictionary<Guid, List<PropertyImageRecord>> _imagesByPropertyId = new();
 
     public InMemoryPropertiesRepository()
     {
@@ -262,6 +312,84 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
 
             _propertiesById[id] = updated;
             return Task.FromResult<PropertyRecord?>(updated);
+        }
+    }
+
+    public Task<IReadOnlyList<PropertyImageRecord>> GetImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var list = _imagesByPropertyId.TryGetValue(propertyId, out var images)
+                ? images.OrderBy(image => image.DisplayOrder).ToList()
+                : new List<PropertyImageRecord>();
+            return Task.FromResult<IReadOnlyList<PropertyImageRecord>>(list);
+        }
+    }
+
+    public Task<int> CountImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var count = _imagesByPropertyId.TryGetValue(propertyId, out var images) ? images.Count : 0;
+            return Task.FromResult(count);
+        }
+    }
+
+    public Task<IReadOnlyList<PropertyImageRecord>> AddImagesAsync(
+        Guid propertyId,
+        IReadOnlyList<NewPropertyImageInput> images,
+        CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            if (!_imagesByPropertyId.TryGetValue(propertyId, out var existing))
+            {
+                existing = new List<PropertyImageRecord>();
+                _imagesByPropertyId[propertyId] = existing;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var created = images.Select(image => new PropertyImageRecord(
+                Id: Guid.NewGuid(),
+                PropertyId: propertyId,
+                StoragePath: image.StoragePath,
+                PublicUrl: image.PublicUrl,
+                MimeType: image.MimeType,
+                FileSizeBytes: image.FileSizeBytes,
+                DisplayOrder: image.DisplayOrder,
+                CreatedAt: now)).ToList();
+
+            existing.AddRange(created);
+            return Task.FromResult<IReadOnlyList<PropertyImageRecord>>(created);
+        }
+    }
+
+    public Task<IReadOnlyList<PropertyImageRecord>> UpdateImageOrderAsync(
+        Guid propertyId,
+        IReadOnlyList<PropertyImageOrderItemRequest> items,
+        CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            if (!_imagesByPropertyId.TryGetValue(propertyId, out var images))
+            {
+                throw new InvalidOperationException($"Image set does not exist for property '{propertyId}'.");
+            }
+
+            var imageMap = images.ToDictionary(image => image.Id);
+            foreach (var item in items)
+            {
+                if (!imageMap.TryGetValue(item.ImageId, out var current))
+                {
+                    throw new InvalidOperationException($"Image '{item.ImageId}' does not belong to property '{propertyId}'.");
+                }
+
+                imageMap[item.ImageId] = current with { DisplayOrder = item.DisplayOrder };
+            }
+
+            var updated = imageMap.Values.OrderBy(image => image.DisplayOrder).ToList();
+            _imagesByPropertyId[propertyId] = updated;
+            return Task.FromResult<IReadOnlyList<PropertyImageRecord>>(updated);
         }
     }
 }
