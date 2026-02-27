@@ -63,10 +63,26 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddProblemDetails();
 builder.Services.AddScoped<IPropertiesRepository, NpgsqlPropertiesRepository>();
 builder.Services.AddSingleton<IPropertyImageStorage, LocalPropertyImageStorage>();
+builder.Services.AddCors(options =>
+{
+    var allowedOriginsRaw = Environment.GetEnvironmentVariable("CORS_ALLOWED_ORIGINS");
+    var allowedOrigins = string.IsNullOrWhiteSpace(allowedOriginsRaw)
+        ? new[] { "http://localhost:3000" }
+        : allowedOriginsRaw
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    options.AddPolicy("FrontendCors", policy =>
+    {
+        policy.WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.UseCors("FrontendCors");
 app.UseStaticFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
