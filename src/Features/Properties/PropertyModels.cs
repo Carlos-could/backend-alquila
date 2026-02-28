@@ -177,6 +177,24 @@ public sealed record PublicPropertySearchResponse(
     int TotalItems,
     int TotalPages);
 
+public sealed record PublicPropertyDetailResponse(
+    Guid Id,
+    string Title,
+    string? Description,
+    string City,
+    string? Neighborhood,
+    string? Address,
+    decimal MonthlyPrice,
+    decimal DepositAmount,
+    int Bedrooms,
+    int Bathrooms,
+    decimal AreaM2,
+    bool IsFurnished,
+    DateOnly AvailableFrom,
+    string ContractType,
+    IReadOnlyList<PropertyImageResponse> Images,
+    IReadOnlyList<PublicPropertyListItemResponse> RelatedByCity);
+
 public sealed record PropertyStatusHistoryRecord(
     Guid Id,
     Guid PropertyId,

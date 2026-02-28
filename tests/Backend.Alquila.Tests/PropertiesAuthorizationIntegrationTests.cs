@@ -205,6 +205,42 @@ public sealed class PropertiesAuthorizationIntegrationTests : IClassFixture<Prop
     }
 
     [Fact]
+    public async Task PublicDetail_WithPublishedProperty_ReturnsOk()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/properties/public/dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<PublicPropertyDetailResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal("Publicado precio 1500", payload!.Title);
+        Assert.NotEmpty(payload.Images);
+        Assert.All(payload.RelatedByCity, item => Assert.Equal("Madrid", item.City));
+        Assert.DoesNotContain(payload.RelatedByCity, item => item.Id == payload.Id);
+    }
+
+    [Fact]
+    public async Task PublicDetail_WithPendingProperty_ReturnsNotFound()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync($"/properties/public/{InMemoryPropertiesRepository.OwnedPropertyId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicDetail_WithUnknownProperty_ReturnsNotFound()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync($"/properties/public/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task UploadPropertyImages_WithInquilinoRole_ReturnsForbidden()
     {
         using var client = _factory.CreateClient();
@@ -373,6 +409,19 @@ public sealed class InMemoryPropertiesRepository : IPropertiesRepository
             Status: "publicado",
             CreatedAt: DateTimeOffset.UtcNow,
             UpdatedAt: DateTimeOffset.UtcNow);
+
+        _imagesByPropertyId[Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd")] = new List<PropertyImageRecord>
+        {
+            new(
+                Id: Guid.Parse("99999999-9999-9999-9999-999999999999"),
+                PropertyId: Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+                StoragePath: "uploads/properties/dddddddd/sample-1.jpg",
+                PublicUrl: "/uploads/properties/dddddddd/sample-1.jpg",
+                MimeType: "image/jpeg",
+                FileSizeBytes: 1024,
+                DisplayOrder: 0,
+                CreatedAt: DateTimeOffset.UtcNow)
+        };
     }
 
     public Task<Guid?> FindUserIdByAuthUserIdAsync(Guid authUserId, CancellationToken cancellationToken)

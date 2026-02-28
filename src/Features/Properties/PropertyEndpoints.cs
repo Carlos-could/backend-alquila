@@ -18,6 +18,7 @@ public static class PropertyEndpoints
     {
         var publicGroup = app.MapGroup("/properties");
         publicGroup.MapGet("/public", ListPublicPropertiesAsync);
+        publicGroup.MapGet("/public/{id:guid}", GetPublicPropertyDetailAsync);
 
         var group = app.MapGroup("/properties").RequireAuthorization();
 
@@ -220,6 +221,54 @@ public static class PropertyEndpoints
 
         var result = await repository.SearchPublishedForPublicAsync(parseResult.Value!, cancellationToken);
         return Results.Ok(result);
+    }
+
+    private static async Task<IResult> GetPublicPropertyDetailAsync(
+        Guid id,
+        IPropertiesRepository repository,
+        CancellationToken cancellationToken)
+    {
+        var property = await repository.GetByIdAsync(id, cancellationToken);
+        if (property is null || !string.Equals(property.Status, PropertyStatuses.Publicado, StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.NotFound();
+        }
+
+        var images = await repository.GetImagesByPropertyIdAsync(id, cancellationToken);
+        var relatedSearch = await repository.SearchPublishedForPublicAsync(
+            new PublicPropertySearchParams(
+                City: property.City,
+                MinPrice: null,
+                MaxPrice: null,
+                Bedrooms: null,
+                IsFurnished: null,
+                Sort: PublicPropertySortOptions.Newest,
+                Page: 1,
+                PageSize: 12),
+            cancellationToken);
+
+        var related = relatedSearch.Items
+            .Where(item => item.Id != property.Id)
+            .Take(6)
+            .ToList();
+
+        return Results.Ok(new PublicPropertyDetailResponse(
+            Id: property.Id,
+            Title: property.Title,
+            Description: property.Description,
+            City: property.City,
+            Neighborhood: property.Neighborhood,
+            Address: property.Address,
+            MonthlyPrice: property.MonthlyPrice,
+            DepositAmount: property.DepositAmount,
+            Bedrooms: property.Bedrooms,
+            Bathrooms: property.Bathrooms,
+            AreaM2: property.AreaM2,
+            IsFurnished: property.IsFurnished,
+            AvailableFrom: property.AvailableFrom,
+            ContractType: property.ContractType,
+            Images: images.Select(PropertyMappings.ToImageResponse).ToList(),
+            RelatedByCity: related));
     }
 
     private static async Task<IResult> GetPropertyImagesAsync(
