@@ -368,135 +368,141 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
 
     public async Task<IReadOnlyList<PropertyModerationQueueItemResponse>> ListPendingModerationAsync(CancellationToken cancellationToken)
     {
-        const string sql = """
-            select id, owner_user_id, title, city, status, updated_at
-            from public.properties
-            where status = 'pendiente'
-            order by updated_at desc;
-            """;
-
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-        var items = new List<PropertyModerationQueueItemResponse>();
-        while (await reader.ReadAsync(cancellationToken))
+        return await ExecuteWithTransientRetryAsync(async token =>
         {
-            items.Add(new PropertyModerationQueueItemResponse(
-                Id: reader.GetGuid(0),
-                OwnerUserId: reader.GetGuid(1),
-                Title: reader.GetString(2),
-                City: reader.GetString(3),
-                Status: reader.GetString(4),
-                UpdatedAt: reader.GetFieldValue<DateTimeOffset>(5)));
-        }
+            const string sql = """
+                select id, owner_user_id, title, city, status, updated_at
+                from public.properties
+                where status = 'pendiente'
+                order by updated_at desc;
+                """;
 
-        return items;
+            await using var connection = await OpenConnectionAsync(token);
+            await using var command = new NpgsqlCommand(sql, connection);
+            await using var reader = await command.ExecuteReaderAsync(token);
+
+            var items = new List<PropertyModerationQueueItemResponse>();
+            while (await reader.ReadAsync(token))
+            {
+                items.Add(new PropertyModerationQueueItemResponse(
+                    Id: reader.GetGuid(0),
+                    OwnerUserId: reader.GetGuid(1),
+                    Title: reader.GetString(2),
+                    City: reader.GetString(3),
+                    Status: reader.GetString(4),
+                    UpdatedAt: reader.GetFieldValue<DateTimeOffset>(5)));
+            }
+
+            return (IReadOnlyList<PropertyModerationQueueItemResponse>)items;
+        }, cancellationToken);
     }
 
     public async Task<PublicPropertySearchResponse> SearchPublishedForPublicAsync(
         PublicPropertySearchParams searchParams,
         CancellationToken cancellationToken)
     {
-        var whereClauses = new List<string> { "p.status = 'publicado'" };
-
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(searchParams.City))
+        return await ExecuteWithTransientRetryAsync(async token =>
         {
-            whereClauses.Add("lower(p.city) = lower(@city)");
-        }
+            var whereClauses = new List<string> { "p.status = 'publicado'" };
 
-        if (searchParams.MinPrice.HasValue)
-        {
-            whereClauses.Add("p.monthly_price >= @minPrice");
-        }
+            await using var connection = await OpenConnectionAsync(token);
 
-        if (searchParams.MaxPrice.HasValue)
-        {
-            whereClauses.Add("p.monthly_price <= @maxPrice");
-        }
-
-        if (searchParams.Bedrooms.HasValue)
-        {
-            whereClauses.Add("p.bedrooms = @bedrooms");
-        }
-
-        if (searchParams.IsFurnished.HasValue)
-        {
-            whereClauses.Add("p.is_furnished = @isFurnished");
-        }
-
-        var whereSql = string.Join(" and ", whereClauses);
-        var orderSql = searchParams.Sort switch
-        {
-            PublicPropertySortOptions.PriceAsc => "p.monthly_price asc, p.updated_at desc",
-            PublicPropertySortOptions.PriceDesc => "p.monthly_price desc, p.updated_at desc",
-            _ => "p.updated_at desc"
-        };
-
-        const string countSqlTemplate = """
-            select count(*)
-            from public.properties p
-            where __WHERE__;
-            """;
-
-        const string dataSqlTemplate = """
-            select p.id, p.title, p.description, p.city, p.neighborhood, p.address,
-                   p.monthly_price, p.bedrooms, p.bathrooms,
-                   (
-                     select i.public_url
-                     from public.property_images i
-                     where i.property_id = p.id
-                     order by i.display_order asc, i.created_at asc
-                     limit 1
-                   ) as cover_image_url
-            from public.properties p
-            where __WHERE__
-            order by __ORDER__
-            limit @limit
-            offset @offset;
-            """;
-
-        await using var countCommand = new NpgsqlCommand(countSqlTemplate.Replace("__WHERE__", whereSql), connection);
-        await using var dataCommand = new NpgsqlCommand(
-            dataSqlTemplate.Replace("__WHERE__", whereSql).Replace("__ORDER__", orderSql),
-            connection);
-
-        AddPublicSearchParameters(countCommand, searchParams);
-        AddPublicSearchParameters(dataCommand, searchParams);
-        dataCommand.Parameters.AddWithValue("limit", searchParams.PageSize);
-        dataCommand.Parameters.AddWithValue("offset", (searchParams.Page - 1) * searchParams.PageSize);
-
-        var countScalar = await countCommand.ExecuteScalarAsync(cancellationToken);
-        var totalItems = countScalar is long count ? checked((int)count) : 0;
-
-        var items = new List<PublicPropertyListItemResponse>();
-        await using (var reader = await dataCommand.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
+            if (!string.IsNullOrWhiteSpace(searchParams.City))
             {
-                items.Add(new PublicPropertyListItemResponse(
-                    Id: reader.GetGuid(0),
-                    Title: reader.GetString(1),
-                    Description: reader.IsDBNull(2) ? null : reader.GetString(2),
-                    City: reader.GetString(3),
-                    Neighborhood: reader.IsDBNull(4) ? null : reader.GetString(4),
-                    Address: reader.IsDBNull(5) ? null : reader.GetString(5),
-                    MonthlyPrice: reader.GetDecimal(6),
-                    Bedrooms: reader.GetInt32(7),
-                    Bathrooms: reader.GetInt32(8),
-                    CoverImageUrl: reader.IsDBNull(9) ? null : reader.GetString(9)));
+                whereClauses.Add("lower(p.city) = lower(@city)");
             }
-        }
 
-        var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)searchParams.PageSize);
-        return new PublicPropertySearchResponse(
-            Items: items,
-            Page: searchParams.Page,
-            PageSize: searchParams.PageSize,
-            TotalItems: totalItems,
-            TotalPages: totalPages);
+            if (searchParams.MinPrice.HasValue)
+            {
+                whereClauses.Add("p.monthly_price >= @minPrice");
+            }
+
+            if (searchParams.MaxPrice.HasValue)
+            {
+                whereClauses.Add("p.monthly_price <= @maxPrice");
+            }
+
+            if (searchParams.Bedrooms.HasValue)
+            {
+                whereClauses.Add("p.bedrooms = @bedrooms");
+            }
+
+            if (searchParams.IsFurnished.HasValue)
+            {
+                whereClauses.Add("p.is_furnished = @isFurnished");
+            }
+
+            var whereSql = string.Join(" and ", whereClauses);
+            var orderSql = searchParams.Sort switch
+            {
+                PublicPropertySortOptions.PriceAsc => "p.monthly_price asc, p.updated_at desc",
+                PublicPropertySortOptions.PriceDesc => "p.monthly_price desc, p.updated_at desc",
+                _ => "p.updated_at desc"
+            };
+
+            const string countSqlTemplate = """
+                select count(*)
+                from public.properties p
+                where __WHERE__;
+                """;
+
+            const string dataSqlTemplate = """
+                select p.id, p.title, p.description, p.city, p.neighborhood, p.address,
+                       p.monthly_price, p.bedrooms, p.bathrooms,
+                       (
+                         select i.public_url
+                         from public.property_images i
+                         where i.property_id = p.id
+                         order by i.display_order asc, i.created_at asc
+                         limit 1
+                       ) as cover_image_url
+                from public.properties p
+                where __WHERE__
+                order by __ORDER__
+                limit @limit
+                offset @offset;
+                """;
+
+            await using var countCommand = new NpgsqlCommand(countSqlTemplate.Replace("__WHERE__", whereSql), connection);
+            await using var dataCommand = new NpgsqlCommand(
+                dataSqlTemplate.Replace("__WHERE__", whereSql).Replace("__ORDER__", orderSql),
+                connection);
+
+            AddPublicSearchParameters(countCommand, searchParams);
+            AddPublicSearchParameters(dataCommand, searchParams);
+            dataCommand.Parameters.AddWithValue("limit", searchParams.PageSize);
+            dataCommand.Parameters.AddWithValue("offset", (searchParams.Page - 1) * searchParams.PageSize);
+
+            var countScalar = await countCommand.ExecuteScalarAsync(token);
+            var totalItems = countScalar is long count ? checked((int)count) : 0;
+
+            var items = new List<PublicPropertyListItemResponse>();
+            await using (var reader = await dataCommand.ExecuteReaderAsync(token))
+            {
+                while (await reader.ReadAsync(token))
+                {
+                    items.Add(new PublicPropertyListItemResponse(
+                        Id: reader.GetGuid(0),
+                        Title: reader.GetString(1),
+                        Description: reader.IsDBNull(2) ? null : reader.GetString(2),
+                        City: reader.GetString(3),
+                        Neighborhood: reader.IsDBNull(4) ? null : reader.GetString(4),
+                        Address: reader.IsDBNull(5) ? null : reader.GetString(5),
+                        MonthlyPrice: reader.GetDecimal(6),
+                        Bedrooms: reader.GetInt32(7),
+                        Bathrooms: reader.GetInt32(8),
+                        CoverImageUrl: reader.IsDBNull(9) ? null : reader.GetString(9)));
+                }
+            }
+
+            var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)searchParams.PageSize);
+            return new PublicPropertySearchResponse(
+                Items: items,
+                Page: searchParams.Page,
+                PageSize: searchParams.PageSize,
+                TotalItems: totalItems,
+                TotalPages: totalPages);
+        }, cancellationToken);
     }
 
     public async Task<PropertyRecord?> UpdateStatusAsync(
@@ -595,33 +601,36 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
 
     public async Task<IReadOnlyList<PropertyStatusHistoryRecord>> GetStatusHistoryAsync(Guid propertyId, CancellationToken cancellationToken)
     {
-        const string sql = """
-            select id, property_id, previous_status, new_status, changed_by_user_id, changed_by_role, reason, changed_at
-            from public.property_status_history
-            where property_id = @propertyId
-            order by changed_at desc;
-            """;
-
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("propertyId", propertyId);
-
-        var items = new List<PropertyStatusHistoryRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        return await ExecuteWithTransientRetryAsync(async token =>
         {
-            items.Add(new PropertyStatusHistoryRecord(
-                Id: reader.GetGuid(0),
-                PropertyId: reader.GetGuid(1),
-                PreviousStatus: reader.GetString(2),
-                NewStatus: reader.GetString(3),
-                ChangedByUserId: reader.IsDBNull(4) ? null : reader.GetGuid(4),
-                ChangedByRole: reader.GetString(5),
-                Reason: reader.IsDBNull(6) ? null : reader.GetString(6),
-                ChangedAt: reader.GetFieldValue<DateTimeOffset>(7)));
-        }
+            const string sql = """
+                select id, property_id, previous_status, new_status, changed_by_user_id, changed_by_role, reason, changed_at
+                from public.property_status_history
+                where property_id = @propertyId
+                order by changed_at desc;
+                """;
 
-        return items;
+            await using var connection = await OpenConnectionAsync(token);
+            await using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("propertyId", propertyId);
+
+            var items = new List<PropertyStatusHistoryRecord>();
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                items.Add(new PropertyStatusHistoryRecord(
+                    Id: reader.GetGuid(0),
+                    PropertyId: reader.GetGuid(1),
+                    PreviousStatus: reader.GetString(2),
+                    NewStatus: reader.GetString(3),
+                    ChangedByUserId: reader.IsDBNull(4) ? null : reader.GetGuid(4),
+                    ChangedByRole: reader.GetString(5),
+                    Reason: reader.IsDBNull(6) ? null : reader.GetString(6),
+                    ChangedAt: reader.GetFieldValue<DateTimeOffset>(7)));
+            }
+
+            return (IReadOnlyList<PropertyStatusHistoryRecord>)items;
+        }, cancellationToken);
     }
 
     private async Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken cancellationToken)
