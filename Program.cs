@@ -16,6 +16,14 @@ if (!string.IsNullOrWhiteSpace(assignedPort))
 {
     builder.WebHost.UseUrls($"http://0.0.0.0:{assignedPort}");
 }
+else
+{
+    var configuredUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+    if (!string.IsNullOrWhiteSpace(configuredUrls))
+    {
+        builder.WebHost.UseUrls(configuredUrls);
+    }
+}
 
 Directory.CreateDirectory(Path.Combine(builder.Environment.ContentRootPath, "uploads"));
 

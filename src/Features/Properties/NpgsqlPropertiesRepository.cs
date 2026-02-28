@@ -39,27 +39,30 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
 
     public async Task<PropertyRecord?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        const string sql = """
-            select id, owner_user_id, title, description, city, neighborhood, address,
-                   monthly_price, deposit_amount, bedrooms, bathrooms, area_m2,
-                   is_furnished, available_from, contract_type, status,
-                   created_at, updated_at
-            from public.properties
-            where id = @id
-            limit 1;
-            """;
-
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("id", id);
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        return await ExecuteWithTransientRetryAsync(async token =>
         {
-            return null;
-        }
+            const string sql = """
+                select id, owner_user_id, title, description, city, neighborhood, address,
+                       monthly_price, deposit_amount, bedrooms, bathrooms, area_m2,
+                       is_furnished, available_from, contract_type, status,
+                       created_at, updated_at
+                from public.properties
+                where id = @id
+                limit 1;
+                """;
 
-        return ReadProperty(reader);
+            await using var connection = await OpenConnectionAsync(token);
+            await using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("id", id);
+
+            await using var reader = await command.ExecuteReaderAsync(token);
+            if (!await reader.ReadAsync(token))
+            {
+                return null;
+            }
+
+            return ReadProperty(reader);
+        }, cancellationToken);
     }
 
     public async Task<PropertyRecord> CreateAsync(
@@ -239,41 +242,47 @@ public sealed class NpgsqlPropertiesRepository : IPropertiesRepository
 
     public async Task<IReadOnlyList<PropertyImageRecord>> GetImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken)
     {
-        const string sql = """
-            select id, property_id, storage_path, public_url, mime_type, file_size_bytes, display_order, created_at
-            from public.property_images
-            where property_id = @propertyId
-            order by display_order asc, created_at asc;
-            """;
-
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("propertyId", propertyId);
-
-        var images = new List<PropertyImageRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        return await ExecuteWithTransientRetryAsync(async token =>
         {
-            images.Add(ReadImage(reader));
-        }
+            const string sql = """
+                select id, property_id, storage_path, public_url, mime_type, file_size_bytes, display_order, created_at
+                from public.property_images
+                where property_id = @propertyId
+                order by display_order asc, created_at asc;
+                """;
 
-        return images;
+            await using var connection = await OpenConnectionAsync(token);
+            await using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("propertyId", propertyId);
+
+            var images = new List<PropertyImageRecord>();
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                images.Add(ReadImage(reader));
+            }
+
+            return (IReadOnlyList<PropertyImageRecord>)images;
+        }, cancellationToken);
     }
 
     public async Task<int> CountImagesByPropertyIdAsync(Guid propertyId, CancellationToken cancellationToken)
     {
-        const string sql = """
-            select count(*)
-            from public.property_images
-            where property_id = @propertyId;
-            """;
+        return await ExecuteWithTransientRetryAsync(async token =>
+        {
+            const string sql = """
+                select count(*)
+                from public.property_images
+                where property_id = @propertyId;
+                """;
 
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("propertyId", propertyId);
+            await using var connection = await OpenConnectionAsync(token);
+            await using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("propertyId", propertyId);
 
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return scalar is long count ? checked((int)count) : 0;
+            var scalar = await command.ExecuteScalarAsync(token);
+            return scalar is long count ? checked((int)count) : 0;
+        }, cancellationToken);
     }
 
     public async Task<IReadOnlyList<PropertyImageRecord>> AddImagesAsync(
